@@ -278,60 +278,13 @@ export default function Auth() {
         <CardContent>
           <Tabs defaultValue="login" className="w-full">
             <TabsList className="grid w-full grid-cols-2 mb-6">
-              <TabsTrigger value="login" className="font-semibold">Přihlášení</TabsTrigger>
-              <TabsTrigger value="signup" className="font-semibold">Registrace</TabsTrigger>
+              <TabsTrigger value="login" className="font-semibold">Přihlášení & Registrace</TabsTrigger>
             </TabsList>
 
             <TabsContent value="login">
               <form onSubmit={handleLogin} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="login-email" className="flex items-center gap-2">
-                    <Mail className="w-4 h-4 text-muted-foreground" />
-                    Email
-                  </Label>
-                  <Input
-                    id="login-email"
-                    type="email"
-                    placeholder="prezdivka@ls.ls"
-                    value={loginForm.email}
-                    onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
-                    className="h-12"
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="login-password" className="flex items-center gap-2">
-                    <Lock className="w-4 h-4 text-muted-foreground" />
-                    Heslo
-                  </Label>
-                  <Input
-                    id="login-password"
-                    type="password"
-                    placeholder="supertajné :D"
-                    value={loginForm.password}
-                    onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                    className="h-12"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowForgotPassword(true)}
-                    className="text-sm text-primary hover:underline"
-                  >
-                    Zapomněli jste heslo?
-                  </button>
-                </div>
-
-                <Button type="submit" variant="hero" size="lg" className="w-full" disabled={loading}>
-                  {loading ? 'Přihlašuji...' : 'Přihlásit se'}
-                </Button>
-
                 <div className="relative my-4">
                   <Separator />
-                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
-                    nebo
-                  </span>
                 </div>
 
                 <Button
@@ -353,69 +306,6 @@ export default function Auth() {
                   <img src={alikLogo} alt="Alík" className="w-5 h-5" />
                   {oauthLoading ? 'Přesměrovávám...' : 'Přihlásit přes Alíka'}
                 </Button>
-              </form>
-            </TabsContent>
-
-            <TabsContent value="signup">
-              <form onSubmit={handleSignup} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="signup-username" className="flex items-center gap-2">
-                    <User className="w-4 h-4 text-muted-foreground" />
-                    Uživatelské jméno
-                  </Label>
-                  <Input
-                    id="signup-username"
-                    type="text"
-                    placeholder="Uživatelské jméno - stejné jako na Alíkovi"
-                    value={signupForm.username}
-                    onChange={(e) => setSignupForm({ ...signupForm, username: e.target.value })}
-                    className="h-12"
-                    required
-                  disabled/>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="signup-email" className="flex items-center gap-2">
-                    <Mail className="w-4 h-4 text-muted-foreground" />
-                    Email
-                  </Label>
-                  <Input
-                    id="signup-email"
-                    type="email"
-                    placeholder="tvuj@email.cz"
-                    value={signupForm.email}
-                    onChange={(e) => setSignupForm({ ...signupForm, email: e.target.value })}
-                    className="h-12"
-                    required
-                  disabled/>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="signup-password" className="flex items-center gap-2">
-                    <Lock className="w-4 h-4 text-muted-foreground" />
-                    Heslo
-                  </Label>
-                  <Input
-                    id="signup-password"
-                    type="password"
-                    placeholder="••••••••"
-                    value={signupForm.password}
-                    onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })}
-                    className="h-12"
-                    required
-                  disabled/>
-                </div>
-
-                <Button type="submit" variant="hero" size="lg" className="w-full" disabled>
-                  {loading ? 'Registruji...' : 'Pro vytvoření napiš <a href="https://alik.cz/u/lopi/">lopimu skrze Alíkovskou</a> <a href="https://www.alik.cz/@/">poštu</a>'}
-                </Button>
-
-                <div className="relative my-4">
-                  <Separator />
-                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
-                    nebo
-                  </span>
-                </div>
               </form>
             </TabsContent>
           </Tabs>
