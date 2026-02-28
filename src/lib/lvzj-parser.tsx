@@ -1,6 +1,7 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { cn } from '@/lib/utils';
 import { ChevronDown, ChevronUp, Music, List, Lock } from 'lucide-react';
+import DOMPurify from 'dompurify';
 
 // LvZJ - Lopiho značkovací jazyk
 // Based on Alíkův značkovací jazyk
@@ -455,6 +456,16 @@ export function parseLvZJ(text: string, userRoles: string[] = []): React.ReactNo
     return `{{PLAYLIST:${urls.join('|||')}}}`;
   });
 
+  // Process HTML blocks (Organizer only)
+  processedText = processedText.replace(/\(html\)([\s\S]*?)\(konec html\)/gi, (match, content) => {
+    if (!userRoles.includes('organizer')) {
+      return '{{RESTRICTED:html}}';
+    }
+    // Base64 encode to prevent inner parsing
+    const encoded = btoa(unescape(encodeURIComponent(content.trim())));
+    return `{{HTML:${encoded}}}`;
+  });
+
   // Split by lines for line-based processing
   const lines = processedText.split('\n');
   const processedLines: React.ReactNode[] = [];
@@ -615,6 +626,25 @@ function parseInline(text: string, userRoles: string[] = []): React.ReactNode {
       const urls = playlistMatch[1].split('|||').filter(Boolean);
       parts.push(<PlaylistEmbed key={keyCounter++} items={urls} />);
       remaining = remaining.substring(playlistMatch[0].length);
+      continue;
+    }
+
+    // HTML placeholder (organizer only)
+    const htmlMatch = remaining.match(/^\{\{HTML:([\s\S]*?)\}\}/);
+    if (htmlMatch) {
+      try {
+        const decoded = decodeURIComponent(escape(atob(htmlMatch[1])));
+        const sanitized = DOMPurify.sanitize(decoded, {
+          ALLOWED_TAGS: ['div', 'span', 'p', 'br', 'b', 'i', 'u', 'strong', 'em', 'a', 'img', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'blockquote', 'pre', 'code', 'small', 'sub', 'sup', 'mark', 'details', 'summary', 'figure', 'figcaption', 'center'],
+          ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'style', 'target', 'rel', 'width', 'height', 'colspan', 'rowspan'],
+        });
+        parts.push(
+          <div key={keyCounter++} className="lvzj-html-block my-2" dangerouslySetInnerHTML={{ __html: sanitized }} />
+        );
+      } catch {
+        parts.push(<span key={keyCounter++} className="text-destructive text-sm">[Chyba HTML]</span>);
+      }
+      remaining = remaining.substring(htmlMatch[0].length);
       continue;
     }
 
