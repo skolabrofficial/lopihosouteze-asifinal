@@ -1,7 +1,28 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { clearStoredState } from "@/lib/oauth";
+import { clearStoredState, getStoredState, getSupabaseUrl } from "@/lib/oauth";
+
+const ERROR_MESSAGES: Record<string, string> = {
+  invalid_state: "Neplatný nebo expirovaný stav přihlášení. Zkus přihlášení znovu.",
+  missing_state: "Chybí bezpečnostní parametr state. Zkus přihlášení znovu.",
+  missing_code: "Přihlašovací kód nebyl doručen.",
+  token_exchange: "Nepodařilo se ověřit přihlášení u Alíka.",
+  userinfo_failed: "Nepodařilo se načíst údaje o účtu z Alíka.",
+  create_user_failed: "Nepodařilo se vytvořit uživatele.",
+  session_failed: "Nepodařilo se vytvořit relaci. Zkus to prosím znovu.",
+  config_error: "OAuth není správně nakonfigurované.",
+  state_store_failed: "Nepodařilo se připravit bezpečné přihlášení.",
+  unexpected: "Při přihlášení nastala neočekávaná chyba.",
+};
+
+function getErrorMessage(errorCode: string | null): string {
+  if (!errorCode) {
+    return "Při přihlášení nastala chyba.";
+  }
+
+  return ERROR_MESSAGES[errorCode] || errorCode;
+}
 
 const OAuthCallback = () => {
   const navigate = useNavigate();
@@ -9,16 +30,32 @@ const OAuthCallback = () => {
 
   useEffect(() => {
     const handleCallback = async () => {
-      // Check for error in query params
       const params = new URLSearchParams(window.location.search);
-      const errorMsg = params.get("error");
-      if (errorMsg) {
-        setError(errorMsg);
+      const errorCode = params.get("error");
+      const errorDescription = params.get("error_description");
+      const code = params.get("code");
+      const callbackState = params.get("state");
+
+      if (code) {
+        const storedState = getStoredState();
+
+        if (!callbackState || !storedState || storedState !== callbackState) {
+          setError(getErrorMessage("invalid_state"));
+          clearStoredState();
+          return;
+        }
+
+        const callbackUrl = `${getSupabaseUrl()}/functions/v1/oauth-callback?${params.toString()}`;
+        window.location.replace(callbackUrl);
+        return;
+      }
+
+      if (errorCode) {
+        setError(errorDescription || getErrorMessage(errorCode));
         clearStoredState();
         return;
       }
 
-      // Extract tokens from URL hash
       const hash = window.location.hash.substring(1);
       const hashParams = new URLSearchParams(hash);
       const accessToken = hashParams.get("access_token");
@@ -30,7 +67,6 @@ const OAuthCallback = () => {
         return;
       }
 
-      // Set the session in Supabase client
       const { error: sessionError } = await supabase.auth.setSession({
         access_token: accessToken,
         refresh_token: refreshToken,
@@ -40,11 +76,10 @@ const OAuthCallback = () => {
 
       if (sessionError) {
         console.error("Session error:", sessionError);
-        setError("Nepodařilo se nastavit session");
+        setError("Nepodařilo se nastavit přihlášení");
         return;
       }
 
-      // Clean URL and redirect
       window.history.replaceState(null, "", "/oauth");
       navigate("/", { replace: true });
     };
@@ -58,12 +93,20 @@ const OAuthCallback = () => {
         <div className="max-w-md rounded-lg border border-destructive/50 bg-card p-6 text-center shadow-lg">
           <h1 className="mb-2 text-xl font-bold text-destructive">Chyba přihlášení</h1>
           <p className="mb-4 text-muted-foreground">{error}</p>
-          <button
-            onClick={() => navigate("/")}
-            className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
-          >
-            Zpět na hlavní stránku
-          </button>
+          <div className="flex items-center justify-center gap-2">
+            <button
+              onClick={() => navigate("/")}
+              className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
+            >
+              Zpět na hlavní stránku
+            </button>
+            <button
+              onClick={() => navigate("/auth/exter")}
+              className="rounded-md border border-border bg-background px-4 py-2 text-sm text-foreground hover:bg-accent"
+            >
+              Zkusit znovu
+            </button>
+          </div>
         </div>
       </div>
     );

@@ -66,6 +66,50 @@ serve(async (req) => {
       );
     }
 
+    if (!state) {
+      return Response.redirect(
+        `${origin}/oauth?error=missing_state`,
+        302
+      );
+    }
+
+    const { data: stateRecord, error: stateError } = await supabaseAdmin
+      .from("oauth_states")
+      .select("id, expires_at, used_at")
+      .eq("state", state)
+      .maybeSingle();
+
+    if (stateError || !stateRecord) {
+      return Response.redirect(
+        `${origin}/oauth?error=invalid_state`,
+        302
+      );
+    }
+
+    const now = new Date();
+    const isExpired = new Date(stateRecord.expires_at).getTime() <= now.getTime();
+    const isUsed = Boolean(stateRecord.used_at);
+
+    if (isExpired || isUsed) {
+      return Response.redirect(
+        `${origin}/oauth?error=invalid_state`,
+        302
+      );
+    }
+
+    const { error: stateUpdateError } = await supabaseAdmin
+      .from("oauth_states")
+      .update({ used_at: now.toISOString() })
+      .eq("id", stateRecord.id)
+      .is("used_at", null);
+
+    if (stateUpdateError) {
+      return Response.redirect(
+        `${origin}/oauth?error=invalid_state`,
+        302
+      );
+    }
+
     // OAuth config
     const clientId = Deno.env.get("OAUTH_CLIENT_ID");
     const clientSecret = Deno.env.get("OAUTH_CLIENT_SECRET");
