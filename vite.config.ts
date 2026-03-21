@@ -19,4 +19,10 @@ export default defineConfig(({ mode }) => ({
   optimizeDeps: {
     include: ["@tanstack/react-query"],
   },
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: "./src/test/setup.ts",
+    css: false,
+  },
 }));

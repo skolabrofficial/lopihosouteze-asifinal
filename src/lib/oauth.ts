@@ -1,26 +1,47 @@
-const SUPABASE_URL = "https://wmmwsbrevzfeqzdrcbrc.supabase.co";
-const ALIK_AUTH_URL = "https://www.alik.cz/oauth/authorize";
+const DEFAULT_SUPABASE_URL = "https://wmmwsbrevzfeqzdrcbrc.supabase.co";
+const OAUTH_STATE_STORAGE_KEY = "oauth_state";
+
+type OAuthStatePayload = {
+  state: string;
+  createdAt: number;
+};
+
+function normalizeUrl(url: string): string {
+  return url.replace(/\/$/, "");
+}
+
+export function getSupabaseUrl(): string {
+  return normalizeUrl(import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL);
+}
+
+function getOAuthStartUrl(): string {
+  return `${getSupabaseUrl()}/functions/v1/oauth-start`;
+}
 
 export async function startOAuthLogin() {
   const state = crypto.randomUUID();
-  localStorage.setItem("oauth_state", state);
+  const payload: OAuthStatePayload = { state, createdAt: Date.now() };
+  localStorage.setItem(OAUTH_STATE_STORAGE_KEY, JSON.stringify(payload));
 
-  const redirectUri = `${SUPABASE_URL}/functions/v1/oauth-callback`;
-
-  const params = new URLSearchParams({
-    response_type: "code",
-    client_id: "lopiho-soutez",
-    redirect_uri: redirectUri,
-    state,
-  });
-
-  window.location.href = `${ALIK_AUTH_URL}?${params.toString()}`;
+  const origin = encodeURIComponent(window.location.origin);
+  window.location.href = `${getOAuthStartUrl()}?state=${encodeURIComponent(state)}&origin=${origin}`;
 }
 
 export function getStoredState(): string | null {
-  return localStorage.getItem("oauth_state");
+  const rawState = localStorage.getItem(OAUTH_STATE_STORAGE_KEY);
+
+  if (!rawState) {
+    return null;
+  }
+
+  try {
+    const parsedState = JSON.parse(rawState) as OAuthStatePayload;
+    return parsedState?.state || null;
+  } catch {
+    return rawState;
+  }
 }
 
 export function clearStoredState() {
-  localStorage.removeItem("oauth_state");
+  localStorage.removeItem(OAUTH_STATE_STORAGE_KEY);
 }
