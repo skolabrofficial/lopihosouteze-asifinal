@@ -11,6 +11,9 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // CORS proxy fallback
+  const CORS_PROXY = "https://cors.io/?";
+  
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
@@ -28,13 +31,17 @@ serve(async (req) => {
     const clientSecret = Deno.env.get("OAUTH_CLIENT_SECRET");
 
     if (!clientId || !clientSecret) {
-      throw new Error("Missing OAuth credentials");
+      throw new Error("Missing OAuth credentials in Supabase secrets");
     }
 
-    // Exchange code for token
-    const tokenResponse = await fetch("https://www.alik.cz/oauth/token", {
+    console.log("Starting token exchange with code:", code.substring(0, 20));
+
+    // Try direct request first
+    let tokenResponse = await fetch("https://www.alik.cz/oauth/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
       body: new URLSearchParams({
         grant_type: "authorization_code",
         code,
@@ -42,24 +49,55 @@ serve(async (req) => {
         client_id: clientId,
         client_secret: clientSecret,
       }).toString(),
+    }).catch((err) => {
+      console.error("Direct request failed:", err.message);
+      return null;
     });
 
-    if (!tokenResponse.ok) {
-      const errorText = await tokenResponse.text();
-      throw new Error(`Token exchange failed: ${errorText}`);
+    // If direct fails, try CORS proxy
+    if (!tokenResponse || !tokenResponse.ok) {
+      console.log("Trying with CORS proxy...");
+      tokenResponse = await fetch(
+        CORS_PROXY + "https://www.alik.cz/oauth/token",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: redirectUri,
+            client_id: clientId,
+            client_secret: clientSecret,
+          }).toString(),
+        }
+      ).catch(() => null);
+    }
+
+    if (!tokenResponse || !tokenResponse.ok) {
+      const text = tokenResponse ? await tokenResponse.text() : "No response";
+      console.error("Token exchange failed:", text);
+      throw new Error("token_exchange_failed");
     }
 
     const tokenData = await tokenResponse.json();
+
+    if (!tokenData.access_token) {
+      throw new Error("no_access_token");
+    }
+
+    console.log("Token obtained, fetching user info...");
 
     // Get user info
     const userInfoResponse = await fetch("https://www.alik.cz/oauth/userinfo", {
       headers: {
         Authorization: `Bearer ${tokenData.access_token}`,
       },
-    });
+    }).catch(() => null);
 
-    if (!userInfoResponse.ok) {
-      throw new Error("Failed to get user info");
+    if (!userInfoResponse || !userInfoResponse.ok) {
+      throw new Error("userinfo_failed");
     }
 
     const userData = await userInfoResponse.json();
@@ -67,8 +105,10 @@ serve(async (req) => {
     const alikUserId = userData.sub;
 
     if (!username || !alikUserId) {
-      throw new Error("Invalid user data");
+      throw new Error("invalid_user_data");
     }
+
+    console.log("User data valid, creating/updating user:", alikUserId);
 
     const email = `alik_${alikUserId}@ls.local`;
     const avatarUrl = username
@@ -114,7 +154,7 @@ serve(async (req) => {
     }
 
     // Update or create profile
-    const { error: profileError } = await supabaseAdmin
+    await supabaseAdmin
       .from("profiles")
       .upsert({
         id: userId,
@@ -122,23 +162,21 @@ serve(async (req) => {
         avatar_url: avatarUrl,
       });
 
-    if (profileError) {
-      console.error("Profile upsert error:", profileError);
+    // Create session
+    const { data: sessionData, error: sessionError } =
+      await supabaseAdmin.auth.admin.generateLink({
+        type: "magiclink",
+        email,
+      });
+
+    if (sessionError) {
+      throw new Error(`Session error: ${sessionError.message}`);
     }
 
-    // Create session tokens
-    const { data, error } = await supabaseAdmin.auth.admin.generateLink({
-      type: "magiclink",
-      email,
-    });
-
-    if (error) {
-      throw new Error(`Session error: ${error.message}`);
-    }
-
-    // Extract token from magic link
-    const actionLink = data.properties.action_link;
+    const actionLink = sessionData.properties.action_link;
     const hashPart = actionLink.split("#")[1];
+
+    console.log("OAuth callback successful for user:", userId);
 
     return new Response(
       JSON.stringify({
@@ -154,7 +192,7 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error("Error:", error);
+    console.error("Callback error:", error);
     return new Response(
       JSON.stringify({
         error: error instanceof Error ? error.message : "Unknown error",
