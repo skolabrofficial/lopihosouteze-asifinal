@@ -21,6 +21,8 @@ serve(async (req) => {
     const body = await req.json();
     const { code, state, redirectUri } = body;
 
+    console.log("OAuth callback request:", { code: code?.substring(0, 20), state, redirectUri });
+
     if (!code || !state) {
       return new Response(
         JSON.stringify({ error: "missing_code_or_state" }),
@@ -31,10 +33,17 @@ serve(async (req) => {
     // OAuth config z env
     const clientId = Deno.env.get("OAUTH_CLIENT_ID");
     const clientSecret = Deno.env.get("OAUTH_CLIENT_SECRET");
-    const tokenUrl = Deno.env.get("OAUTH_TOKEN_URL");
-    const userInfoUrl = Deno.env.get("OAUTH_USERINFO_URL");
+    const tokenUrl = Deno.env.get("OAUTH_TOKEN_URL") || "https://www.alik.cz/oauth/token";
+    const userInfoUrl = Deno.env.get("OAUTH_USERINFO_URL") || "https://www.alik.cz/oauth/userinfo";
 
-    if (!clientId || !clientSecret || !tokenUrl || !userInfoUrl) {
+    console.log("OAuth config check:", {
+      clientId: clientId ? "✓" : "✗",
+      clientSecret: clientSecret ? "✓" : "✗",
+      tokenUrl,
+      userInfoUrl,
+    });
+
+    if (!clientId || !clientSecret) {
       console.error("Missing OAuth config");
       return new Response(
         JSON.stringify({ error: "config_error" }),
@@ -43,6 +52,8 @@ serve(async (req) => {
     }
 
     // === EXCHANGE CODE FOR TOKEN ===
+    console.log("Exchanging code for token at:", tokenUrl);
+    
     const tokenParams = new URLSearchParams({
       grant_type: "authorization_code",
       code,
@@ -51,33 +62,52 @@ serve(async (req) => {
       client_secret: clientSecret,
     });
 
-    console.log("Exchanging code for token...");
+    console.log("Token request body:", tokenParams.toString());
+
     const tokenResponse = await fetch(tokenUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: { 
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
       body: tokenParams.toString(),
     });
 
+    const tokenResponseText = await tokenResponse.text();
+    console.log("Token response status:", tokenResponse.status);
+    console.log("Token response body:", tokenResponseText);
+
     if (!tokenResponse.ok) {
-      console.error("Token exchange failed:", tokenResponse.status, await tokenResponse.text());
+      console.error("Token exchange failed");
       return new Response(
-        JSON.stringify({ error: "token_exchange_failed" }),
+        JSON.stringify({ 
+          error: "token_exchange_failed",
+          details: tokenResponseText 
+        }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const tokenData = await tokenResponse.json();
+    let tokenData;
+    try {
+      tokenData = JSON.parse(tokenResponseText);
+    } catch (e) {
+      console.error("Failed to parse token response");
+      return new Response(
+        JSON.stringify({ error: "invalid_token_response" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     if (!tokenData.access_token) {
-      console.error("No access token in response");
+      console.error("No access token in response:", tokenData);
       return new Response(
-        JSON.stringify({ error: "no_access_token" }),
+        JSON.stringify({ error: "no_access_token", details: tokenData }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     // === GET USER INFO ===
-    console.log("Fetching user info...");
+    console.log("Fetching user info from:", userInfoUrl);
     const userInfoResponse = await fetch(userInfoUrl, {
       headers: {
         Authorization: `Bearer ${tokenData.access_token}`,
@@ -93,6 +123,7 @@ serve(async (req) => {
     }
 
     const userData = await userInfoResponse.json();
+    console.log("User data received:", { sub: userData.sub, nickname: userData.nickname });
 
     const username = userData.nickname || userData.username || userData.name;
     const alikUserId = userData.sub;
@@ -113,15 +144,13 @@ serve(async (req) => {
     const email = `alik_${alikUserId}@ls.local`;
 
     // === FIND OR CREATE USER ===
-    console.log("Looking for user:", alikUserId);
+    console.log("Looking for user with alik_user_id:", alikUserId);
     const { data: users } = await supabaseAdmin.auth.admin.listUsers();
     let existingUser = users.users.find(
       (u) => u.user_metadata?.alik_user_id === alikUserId
     );
 
     let userId: string;
-    let authToken: string;
-    let refreshToken: string;
 
     if (existingUser) {
       console.log("Found existing user:", existingUser.id);
@@ -145,32 +174,8 @@ serve(async (req) => {
           avatar_url: avatarUrl,
         })
         .eq("id", userId);
-
-      // Vygenerujte nový token
-      const { data: sessionData, error: sessionError } =
-        await supabaseAdmin.auth.admin.generateLink({
-          type: "magiclink",
-          email,
-          options: {
-            redirectTo: `${origin}?oauth_success=true`,
-          },
-        });
-
-      if (sessionError) {
-        console.error("Session generation failed:", sessionError);
-        return new Response(
-          JSON.stringify({ error: "session_failed" }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      // Extract tokens from the magic link
-      const { data: session } = await supabaseAdmin.auth.admin.getUser(userId);
-      // Use temporary token
-      authToken = sessionData.properties.action_link.split("#")[1] || "";
-      refreshToken = sessionData.properties.action_link.split("#")[1] || "";
     } else {
-      console.log("Creating new user:", alikUserId);
+      console.log("Creating new user");
       const randomPassword = crypto.randomUUID() + crypto.randomUUID();
 
       const { data: newUser, error: createError } =
@@ -190,7 +195,7 @@ serve(async (req) => {
       if (createError) {
         console.error("User creation failed:", createError);
         return new Response(
-          JSON.stringify({ error: "create_user_failed" }),
+          JSON.stringify({ error: "create_user_failed", details: createError.message }),
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -198,44 +203,49 @@ serve(async (req) => {
       userId = newUser.user.id;
 
       // Create profile
-      const { error: profileError } = await supabaseAdmin.from("profiles").insert({
+      await supabaseAdmin.from("profiles").insert({
         id: userId,
         username,
         avatar_url: avatarUrl,
       });
+    }
 
-      if (profileError) {
-        console.error("Profile creation failed:", profileError);
-      }
+    // === CREATE SESSION ===
+    console.log("Creating session for user:", userId);
+    const { data: sessionData, error: sessionError } =
+      await supabaseAdmin.auth.admin.generateLink({
+        type: "magiclink",
+        email,
+        options: {
+          redirectTo: `${origin}`,
+        },
+      });
 
-      // Vygenerujte token pro nového uživatele
-      const { data: sessionData, error: sessionError } =
-        await supabaseAdmin.auth.admin.generateLink({
-          type: "magiclink",
-          email,
-          options: {
-            redirectTo: `${origin}?oauth_success=true`,
-          },
-        });
+    if (sessionError) {
+      console.error("Session generation failed:", sessionError);
+      return new Response(
+        JSON.stringify({ error: "session_failed", details: sessionError.message }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
-      if (sessionError) {
-        console.error("Session generation failed:", sessionError);
-        return new Response(
-          JSON.stringify({ error: "session_failed" }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      authToken = sessionData.properties.action_link.split("#")[1] || "";
-      refreshToken = sessionData.properties.action_link.split("#")[1] || "";
+    // Extract access token from the magic link token
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.admin.getUserById(userId);
+    
+    if (userError || !user) {
+      console.error("Failed to get user session");
+      return new Response(
+        JSON.stringify({ error: "session_failed" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     console.log("OAuth callback successful for user:", userId);
 
     return new Response(
       JSON.stringify({
-        accessToken: authToken,
-        refreshToken: refreshToken,
+        accessToken: sessionData.properties.action_link,
+        refreshToken: sessionData.properties.action_link,
       }),
       {
         status: 200,
