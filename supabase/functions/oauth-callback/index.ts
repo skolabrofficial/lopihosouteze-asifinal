@@ -58,7 +58,35 @@ serve(async (req) => {
     const url = new URL(req.url);
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
+const state = url.searchParams.get("state");
 
+if (!state) {
+  return Response.redirect(
+    `${origin}/oauth?error=missing_state`,
+    302
+  );
+}
+
+// Validujte state vůči databázi
+const { data: stateRecord, error: stateError } = await supabaseAdmin
+  .from("oauth_states")
+  .select("*")
+  .eq("state", state)
+  .single();
+
+if (stateError || !stateRecord) {
+  return Response.redirect(
+    `${origin}/oauth?error=invalid_state`,
+    302
+  );
+}
+
+if (new Date() > new Date(stateRecord.expires_at)) {
+  return Response.redirect(
+    `${origin}/oauth?error=state_expired`,
+    302
+  );
+}
     if (!code) {
       return Response.redirect(
         `${origin}/oauth?error=missing_code`,
