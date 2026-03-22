@@ -16,7 +16,6 @@ const OAuthCallback = () => {
         const code = params.get("code");
         const state = params.get("state");
 
-        // Kontrola OAuth chyby z providera
         if (errorMsg) {
           setError(errorMsg);
           clearStoredState();
@@ -24,7 +23,6 @@ const OAuthCallback = () => {
           return;
         }
 
-        // Validace state
         const storedState = getStoredState();
         if (!state || state !== storedState) {
           setError("invalid_state");
@@ -40,34 +38,51 @@ const OAuthCallback = () => {
           return;
         }
 
-        // Zavolejte backend funkci na Supabase
         const redirectUri = `${window.location.origin}/oauth`;
-        
-        const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/oauth-callback`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            code,
-            state,
-            redirectUri,
-          }),
-        });
+
+        console.log("Calling oauth-callback function...");
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/oauth-callback`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              code,
+              state,
+              redirectUri,
+            }),
+          }
+        );
+
+        console.log("Response status:", response.status);
+        const responseData = await response.json();
+        console.log("Response data:", responseData);
 
         if (!response.ok) {
-          const errorData = await response.json();
-          setError(errorData.error || "token_exchange_failed");
+          setError(responseData.error || "callback_failed");
           setChecking(false);
           return;
         }
 
-        const { accessToken, refreshToken } = await response.json();
+        const { accessToken, refreshToken } = responseData;
 
-        // Nastavte session v Supabase
+        if (!accessToken || !refreshToken) {
+          setError("invalid_tokens");
+          setChecking(false);
+          return;
+        }
+
+        // Parse the token hash
+        const hashParams = new URLSearchParams(accessToken);
+        const actualAccessToken = hashParams.get("access_token");
+        const actualRefreshToken = hashParams.get("refresh_token");
+
+        console.log("Setting session...");
         const { error: sessionError } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
+          access_token: actualAccessToken || accessToken,
+          refresh_token: actualRefreshToken || refreshToken,
         });
 
         clearStoredState();
@@ -79,7 +94,7 @@ const OAuthCallback = () => {
           return;
         }
 
-        // Přesměrujte domů
+        console.log("Session set successfully, redirecting...");
         navigate("/", { replace: true });
       } catch (err) {
         console.error("Callback error:", err);
@@ -103,21 +118,11 @@ const OAuthCallback = () => {
   }
 
   if (error) {
-    const errorMessages: Record<string, string> = {
-      invalid_state: "Bezpečnostní ověření selhalo. Zkuste se přihlásit znovu.",
-      missing_code: "Autorizační kód chybí. Zkuste se přihlásit znovu.",
-      token_exchange_failed: "Chyba při výměně tokenu. Zkuste se přihlásit znovu.",
-      session_failed: "Nepodařilo se vytvořit relaci. Zkuste se přihlásit znovu.",
-      unexpected_error: "Došlo k neočekávané chybě. Zkuste se přihlásit znovu.",
-    };
-
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="max-w-md rounded-lg border border-destructive/50 bg-card p-6 text-center shadow-lg">
           <h1 className="mb-2 text-xl font-bold text-destructive">Chyba přihlášení</h1>
-          <p className="mb-4 text-muted-foreground">
-            {errorMessages[error] || "Chyba při přihlášení"}
-          </p>
+          <p className="mb-4 text-muted-foreground">{error}</p>
           <button
             onClick={() => navigate("/auth")}
             className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
