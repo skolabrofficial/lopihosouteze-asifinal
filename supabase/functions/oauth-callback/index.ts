@@ -59,6 +59,45 @@ serve(async (req) => {
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
 
+    // ===== VALIDACE STATE (CSRF OCHRANA) =====
+    if (!state) {
+      return Response.redirect(
+        `${origin}/oauth?error=missing_state`,
+        302
+      );
+    }
+
+    // Ověřte state v databázi
+    const { data: stateRecord, error: stateError } = await supabaseAdmin
+      .from("oauth_states")
+      .select("*")
+      .eq("state", state)
+      .single();
+
+    if (stateError || !stateRecord) {
+      return Response.redirect(
+        `${origin}/oauth?error=invalid_state`,
+        302
+      );
+    }
+
+    // Kontrola expiraci
+    if (new Date() > new Date(stateRecord.expires_at)) {
+      return Response.redirect(
+        `${origin}/oauth?error=state_expired`,
+        302
+      );
+    }
+
+    // Kontrola, zda nebyl state již použit
+    if (stateRecord.used_at) {
+      return Response.redirect(
+        `${origin}/oauth?error=state_reused`,
+        302
+      );
+    }
+    // ===== KONEC VALIDACE STATE =====
+
     if (!code) {
       return Response.redirect(
         `${origin}/oauth?error=missing_code`,
@@ -195,6 +234,13 @@ serve(async (req) => {
 
       userId = newUser.user.id;
     }
+
+    // ===== OZNAČTE STATE JAKO POUŽITÝ =====
+    await supabaseAdmin
+      .from("oauth_states")
+      .update({ used_at: new Date().toISOString() })
+      .eq("state", state);
+    // ===== KONEC OZNAČENÍ STATE =====
 
     // Create login session via magiclink
     const { data: linkData, error: linkError } =
