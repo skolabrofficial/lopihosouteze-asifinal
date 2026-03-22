@@ -38,66 +38,107 @@ const OAuthCallback = () => {
           return;
         }
 
+        const clientId = import.meta.env.VITE_OAUTH_CLIENT_ID || "lopiho-soutez";
         const redirectUri = `${window.location.origin}/oauth`;
 
-        console.log("Calling oauth-callback function...");
-        const response = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/oauth-callback`,
+        // FRONTEND TOKEN EXCHANGE (direktně v browseru)
+        console.log("Exchanging code for token...");
+        const tokenResponse = await fetch("https://www.alik.cz/oauth/token", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: redirectUri,
+            client_id: clientId,
+            // POZOR: client_secret se NESMÍ posílat z frontendu!
+          }).toString(),
+        });
+
+        if (!tokenResponse.ok) {
+          const errorText = await tokenResponse.text();
+          console.error("Token exchange error:", errorText);
+          setError("token_exchange_failed");
+          setChecking(false);
+          return;
+        }
+
+        const tokenData = await tokenResponse.json();
+
+        if (!tokenData.access_token) {
+          setError("no_access_token");
+          setChecking(false);
+          return;
+        }
+
+        // Get user info
+        console.log("Fetching user info...");
+        const userInfoResponse = await fetch("https://www.alik.cz/oauth/userinfo", {
+          headers: {
+            Authorization: `Bearer ${tokenData.access_token}`,
+          },
+        });
+
+        if (!userInfoResponse.ok) {
+          setError("userinfo_failed");
+          setChecking(false);
+          return;
+        }
+
+        const userData = await userInfoResponse.json();
+        const username = userData.nickname || userData.username || userData.name;
+        const alikUserId = userData.sub;
+
+        if (!username || !alikUserId) {
+          setError("invalid_user_data");
+          setChecking(false);
+          return;
+        }
+
+        // Zavolejte backend pro vytvoření/update uživatele
+        const createUserResponse = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/oauth-create-user`,
           {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
+              Authorization: `Bearer ${tokenData.access_token}`,
             },
             body: JSON.stringify({
-              code,
-              state,
-              redirectUri,
+              username,
+              alikUserId,
+              avatar: userData.avatar_url,
             }),
           }
         );
 
-        console.log("Response status:", response.status);
-        const responseData = await response.json();
-        console.log("Response data:", responseData);
-
-        if (!response.ok) {
-          setError(responseData.error || "callback_failed");
+        if (!createUserResponse.ok) {
+          setError("create_user_failed");
           setChecking(false);
           return;
         }
 
-        const { accessToken, refreshToken } = responseData;
+        const { sessionToken } = await createUserResponse.json();
 
-        if (!accessToken || !refreshToken) {
-          setError("invalid_tokens");
-          setChecking(false);
-          return;
-        }
-
-        // Parse the token hash
-        const hashParams = new URLSearchParams(accessToken);
-        const actualAccessToken = hashParams.get("access_token");
-        const actualRefreshToken = hashParams.get("refresh_token");
-
-        console.log("Setting session...");
+        // Set session
         const { error: sessionError } = await supabase.auth.setSession({
-          access_token: actualAccessToken || accessToken,
-          refresh_token: actualRefreshToken || refreshToken,
+          access_token: sessionToken.access_token,
+          refresh_token: sessionToken.refresh_token,
         });
 
         clearStoredState();
 
         if (sessionError) {
-          console.error("Session error:", sessionError);
           setError("session_failed");
           setChecking(false);
           return;
         }
 
-        console.log("Session set successfully, redirecting...");
         navigate("/", { replace: true });
       } catch (err) {
-        console.error("Callback error:", err);
+        console.error("Error:", err);
         setError("unexpected_error");
         setChecking(false);
       }
