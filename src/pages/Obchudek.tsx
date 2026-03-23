@@ -79,7 +79,7 @@ export default function Obchudek() {
 
     // Pre-check (real validation happens in database function)
     if (userPoints < selectedItem.price) {
-      toast.error('Nemáš dostatek bodů!');
+      toast.error('Nemáš dostatek bodů! Piš barde, střádej, a až budeš mít dostatek bodů, přijde den, zúčtujeme spolu.');
       return;
     }
 
@@ -153,7 +153,7 @@ export default function Obchudek() {
     }
 
     if (freshProfile.points < freshItem.price) {
-      toast.error('Nemáš dostatek bodů!');
+      toast.error('Nemáš dostatek bodů! Piš barde, střádej, a až budeš mít dostatek bodů, přijde den, zúčtujeme spolu.');
       setPurchasing(false);
       return;
     }
