@@ -2,12 +2,14 @@ import { useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const db = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+  import.meta.env.VITE_SUPABASE_URL.replaceAll('"', ""),
+  import.meta.env.VITE_SUPABASE_KEY.replaceAll('"', "")
 );
 
 export default function QuizBuilder() {
+  const [ok, setOk] = useState(false);
   const [pw, setPw] = useState("");
+
   const [title, setTitle] = useState("Můj kvíz");
 
   const [q, setQ] = useState([
@@ -24,20 +26,38 @@ export default function QuizBuilder() {
     },
   ]);
 
-  const save = async () => {
-    if (pw !== import.meta.env.VITE_QUIZ_PASSWORD) {
+  const login = () => {
+    if (
+      pw !==
+      import.meta.env.VITE_QUIZ_PASSWORD.replaceAll(
+        '"',
+        ""
+      )
+    ) {
       return alert("Špatné heslo");
     }
 
+    console.log("[QUIZ LOGIN SUCCESS]");
+    setOk(true);
+  };
+
+  const save = async () => {
     if (!q[0].q.trim()) {
       return alert("První otázka je povinná");
     }
 
-    const { error } = await db.from("quizzes").insert({
+    const payload = {
       title,
       questions: q,
       results: r,
-    });
+      created_at: new Date().toISOString(),
+    };
+
+    console.log("[QUIZ SAVE START]", payload);
+
+    const { error } = await db
+      .from("quizzes")
+      .insert(payload);
 
     if (error) {
       console.error(error);
@@ -45,29 +65,44 @@ export default function QuizBuilder() {
     }
 
     console.log("[QUIZ SAVED]");
-
-    alert("Uloženo");
+    alert("Uloženo do DB");
   };
+
+  if (!ok) {
+    return (
+      <div style={s.p}>
+        <div style={s.login}>
+          <h1 style={s.h1}>✨ Quiz Builder</h1>
+
+          <input
+            style={s.i}
+            type="password"
+            placeholder="Admin heslo"
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+          />
+
+          <button style={s.save} onClick={login}>
+            Přihlásit se
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={s.p}>
       <div style={s.box}>
-        <h1>✨ Quiz Builder</h1>
+        <div style={s.card}>
+          <h1 style={s.h1}>✨ Quiz Builder</h1>
 
-        <input
-          style={s.i}
-          placeholder="Heslo"
-          type="password"
-          value={pw}
-          onChange={(e) => setPw(e.target.value)}
-        />
-
-        <input
-          style={s.i}
-          placeholder="Název"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
+          <input
+            style={s.i}
+            placeholder="Název kvízu"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </div>
 
         {q.map((x, qi) => (
           <div key={qi} style={s.card}>
@@ -110,9 +145,11 @@ export default function QuizBuilder() {
                   style={s.red}
                   onClick={() => {
                     const n = [...q];
+
                     n[qi].a = n[qi].a.filter(
                       (_, i) => i !== ai
                     );
+
                     setQ(n);
                   }}
                 >
@@ -125,10 +162,12 @@ export default function QuizBuilder() {
               style={s.btn}
               onClick={() => {
                 const n = [...q];
+
                 n[qi].a.push({
                   t: "",
                   p: 0,
                 });
+
                 setQ(n);
               }}
             >
@@ -153,7 +192,7 @@ export default function QuizBuilder() {
         </button>
 
         <div style={s.card}>
-          <h3>Výsledky</h3>
+          <h2>Výsledky</h2>
 
           {r.map((x, i) => (
             <div key={i} style={s.row}>
@@ -170,7 +209,7 @@ export default function QuizBuilder() {
 
               <input
                 style={{ ...s.i, flex: 1 }}
-                placeholder="Text"
+                placeholder="Text výsledku"
                 value={x.text}
                 onChange={(e) => {
                   const n = [...r];
@@ -197,8 +236,24 @@ export default function QuizBuilder() {
           </button>
         </div>
 
+        <div style={s.card}>
+          <h2>📦 Náhled dat</h2>
+
+          <pre style={s.pre}>
+            {JSON.stringify(
+              {
+                title,
+                questions: q,
+                results: r,
+              },
+              null,
+              2
+            )}
+          </pre>
+        </div>
+
         <button style={s.save} onClick={save}>
-          Uložit
+          Uložit do DB
         </button>
       </div>
     </div>
@@ -208,9 +263,23 @@ export default function QuizBuilder() {
 const s: any = {
   p: {
     minHeight: "100vh",
-    background: "#f4f4ff",
+    background:
+      "linear-gradient(135deg,#f5f7ff,#eef2ff)",
     padding: 30,
-    fontFamily: "sans-serif",
+    fontFamily:
+      "Inter,system-ui,sans-serif",
+  },
+
+  login: {
+    maxWidth: 420,
+    margin: "120px auto",
+    background: "#fff",
+    padding: 30,
+    borderRadius: 24,
+    display: "flex",
+    flexDirection: "column",
+    gap: 16,
+    boxShadow: "0 10px 40px #0001",
   },
 
   box: {
@@ -224,11 +293,11 @@ const s: any = {
   card: {
     background: "#fff",
     padding: 20,
-    borderRadius: 20,
+    borderRadius: 24,
     display: "flex",
     flexDirection: "column",
-    gap: 12,
-    boxShadow: "0 5px 20px #0001",
+    gap: 14,
+    boxShadow: "0 10px 30px #0001",
   },
 
   row: {
@@ -236,17 +305,23 @@ const s: any = {
     gap: 10,
   },
 
+  h1: {
+    margin: 0,
+    fontSize: 34,
+  },
+
   i: {
     border: "1px solid #ddd",
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: 14,
+    padding: 14,
     fontSize: 15,
+    outline: "none",
   },
 
   btn: {
     border: 0,
     padding: 12,
-    borderRadius: 12,
+    borderRadius: 14,
     background: "#7c3aed",
     color: "#fff",
     cursor: "pointer",
@@ -255,7 +330,7 @@ const s: any = {
   save: {
     border: 0,
     padding: 16,
-    borderRadius: 14,
+    borderRadius: 16,
     background: "#10b981",
     color: "#fff",
     fontSize: 16,
@@ -265,19 +340,40 @@ const s: any = {
   red: {
     border: 0,
     width: 44,
-    borderRadius: 12,
+    borderRadius: 14,
     background: "#ef4444",
     color: "#fff",
     cursor: "pointer",
   },
+
+  pre: {
+    background: "#111827",
+    color: "#fff",
+    padding: 16,
+    borderRadius: 16,
+    overflow: "auto",
+    fontSize: 13,
+  },
 };
 
 /*
-.env
 
-VITE_SUPABASE_URL=...
-VITE_SUPABASE_KEY=...
-VITE_QUIZ_PASSWORD=ClanekAlik1321
+SQL:
+
+create table quizzes (
+  id bigint generated always as identity primary key,
+  title text,
+  questions jsonb,
+  results jsonb,
+  created_at timestamptz default now()
+);
+
+.env:
+
+VITE_SUPABASE_URL="https://xxx.supabase.co"
+VITE_SUPABASE_KEY="eyJhbGciOi..."
+VITE_QUIZ_PASSWORD="ClanekAlik1321"
 
 npm i @supabase/supabase-js
+
 */
